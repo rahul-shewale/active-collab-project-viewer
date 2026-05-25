@@ -49,33 +49,48 @@ if (isset($_GET['img'])) {
 
     $attachId = (int) $_GET['img'];
 
-    $ch = curl_init(
-        $BASE_URL . "/api/v1/projects/$PROJECT_ID/attachments/$attachId/download"
-    );
+    // /api/v1/attachments/{id}/download is confirmed working
+    $url = $BASE_URL . "/api/v1/attachments/$attachId/download";
 
+    $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_TIMEOUT        => 60,
         CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
         CURLOPT_HTTPHEADER     => [
-            'X-Angie-AuthApiToken: ' . $TOKEN
+            'X-Angie-AuthApiToken: ' . $TOKEN,
         ],
     ]);
 
-    $imgData = curl_exec($ch);
-    $mime    = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'image/jpeg';
-    $status  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
+    $imgData     = curl_exec($ch);
+    $status      = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'image/jpeg';
+    $curlError   = curl_error($ch);
     curl_close($ch);
 
-    if ($status >= 200 && $status < 300 && $imgData) {
-        header('Content-Type: ' . $mime);
+    if (isset($_GET['debug'])) {
+        echo "<b>URL:</b> $url<br>";
+        echo "<b>Status:</b> $status<br>";
+        echo "<b>Content-Type:</b> $contentType<br>";
+        echo "<b>Curl Error:</b> " . ($curlError ?: 'none') . "<br>";
+        echo "<b>Response size:</b> " . strlen($imgData) . " bytes<br>";
+        echo "<b>First bytes (hex):</b> " . bin2hex(substr($imgData, 0, 8)) . "<br>";
+        exit;
+    }
+
+    if ($status === 200 && strlen($imgData) > 100) {
+        // Strip charset if present e.g. "image/jpeg; charset=..."
+        $mime = strtok($contentType, ';') ?: 'image/jpeg';
+        header('Content-Type: ' . trim($mime));
         header('Cache-Control: max-age=86400');
         header('Content-Length: ' . strlen($imgData));
         echo $imgData;
     } else {
         http_response_code(404);
-        echo 'Image not found';
+        header('Content-Type: text/plain');
+        echo "Image not found. Status: $status. Error: $curlError";
     }
 
     exit;
@@ -94,33 +109,34 @@ if (isset($_GET['file'])) {
     $attachId = (int) $_GET['file'];
     $fileName = basename($_GET['name'] ?? 'download');
 
-    $ch = curl_init(
-        $BASE_URL . "/api/v1/projects/$PROJECT_ID/attachments/$attachId/download"
-    );
+    $url = $BASE_URL . "/api/v1/attachments/$attachId/download";
 
+    $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => 60,
         CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
         CURLOPT_HTTPHEADER     => [
-            'X-Angie-AuthApiToken: ' . $TOKEN
+            'X-Angie-AuthApiToken: ' . $TOKEN,
         ],
     ]);
 
-    $fileData = curl_exec($ch);
-    $mime     = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'application/octet-stream';
-    $status   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
+    $fileData    = curl_exec($ch);
+    $status      = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'application/octet-stream';
     curl_close($ch);
 
-    if ($status >= 200 && $status < 300 && $fileData) {
-        header('Content-Type: ' . $mime);
+    if ($status === 200 && strlen($fileData) > 0) {
+        $mime = strtok($contentType, ';') ?: 'application/octet-stream';
+        header('Content-Type: ' . trim($mime));
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
         header('Content-Length: ' . strlen($fileData));
         echo $fileData;
     } else {
         http_response_code(404);
-        echo 'File not found';
+        echo 'File not found. Status: ' . $status;
     }
 
     exit;
@@ -242,12 +258,14 @@ function cleanHtml($html)
 
 function proxyImageUrl($attachmentId)
 {
-    return '/ActiveCollab.php?img=' . (int) $attachmentId;
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/ActiveCollab.php';
+    return $script . '?img=' . (int) $attachmentId;
 }
 
 function proxyFileUrl($attachmentId, $fileName)
 {
-    return '/ActiveCollab.php?file=' . (int) $attachmentId
+    $script = $_SERVER['SCRIPT_NAME'] ?? '/ActiveCollab.php';
+    return $script . '?file=' . (int) $attachmentId
          . '&name=' . urlencode($fileName);
 }
 
